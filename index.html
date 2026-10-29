@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Barcode Audit & Inventory Scanner</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- html5-qrcode for cross-platform iOS Safari & Android camera scanning -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <!-- FontAwesome for crisp mobile icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <style>
+    /* Mobile-optimized viewport adjustments & custom animations */
+    body {
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior-y: contain;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    
+    /* HTML5-QRCode Scanner container styling */
+    #reader {
+      border: none !important;
+      overflow: hidden;
+      border-radius: 1rem;
+    }
+    #reader video {
+      border-radius: 1rem;
+      object-fit: cover;
+      width: 100% !important;
+    }
+    #reader__scan_region {
+      background: transparent !important;
+    }
+    #reader__dashboard {
+      display: none !important; /* Hide default controls to use our custom UI */
+    }
+
+    /* Laser scanner beam animation */
+    @keyframes scanLaser {
+      0% { top: 12%; opacity: 0.8; }
+      50% { top: 88%; opacity: 1; }
+      100% { top: 12%; opacity: 0.8; }
+    }
+    .scanner-laser {
+      position: absolute;
+      left: 10%;
+      right: 10%;
+      height: 2px;
+      background: #22c55e;
+      box-shadow: 0 0 10px 2px #22c55e, 0 0 20px 4px rgba(34, 197, 94, 0.4);
+      animation: scanLaser 2.2s ease-in-out infinite;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* Custom Toast transition */
+    #notification-toast {
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease;
+    }
+    .toast-hidden {
+      transform: translateY(-150%);
+      opacity: 0;
+      pointer-events: none;
+    }
+    .toast-visible {
+      transform: translateY(0%);
+      opacity: 1;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col antialiased select-none pb-24">
+
+  <!-- TOP HEADER / NAV -->
+  <header class="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center space-x-2.5">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
+        <i class="fa-solid fa-barcode text-lg"></i>
+      </div>
+      <div>
+        <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-1.5">
+          ScanAudit <span class="text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30">PRO</span>
+        </h1>
+        <p class="text-[11px] text-slate-400">iOS & Android Hardware Tracker</p>
+      </div>
+    </div>
+
+    <!-- Master List Toggle & Settings -->
+    <div class="flex items-center space-x-2">
+      <button id="toggle-list-config-btn" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 border border-slate-700 text-slate-200 active:bg-slate-700 flex items-center gap-1.5">
+        <i class="fa-solid fa-clipboard-list text-emerald-400"></i>
+        <span>Master List</span>
+      </button>
+      <button id="reset-session-btn" title="Reset Session" class="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 active:text-rose-400 flex items-center justify-center">
+        <i class="fa-solid fa-arrow-rotate-left text-xs"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- NOTIFICATION BANNER / TOAST -->
+  <div id="notification-toast" class="toast-hidden fixed top-3 left-4 right-4 z-50 rounded-xl p-3 shadow-2xl flex items-center gap-3 border backdrop-blur-md">
+    <div id="toast-icon" class="text-xl"></div>
+    <div class="flex-1 min-w-0">
+      <p id="toast-title" class="text-xs font-bold uppercase tracking-wider"></p>
+      <p id="toast-message" class="text-sm font-semibold truncate"></p>
+    </div>
+  </div>
+
+  <!-- MAIN SCROLLABLE CONTAINER -->
+  <main class="flex-1 max-w-xl w-full mx-auto p-4 space-y-4">
+
+    <!-- MASTER LIST MODAL / CONFIG ACCORDION -->
+    <div id="master-list-modal" class="hidden bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-sliders text-emerald-400"></i>
+          <span class="text-sm font-bold">Audit Target / Master List</span>
+        </div>
+        <button id="close-config-btn" class="text-slate-400 hover:text-white p-1">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-400">
+        Paste expected serials separated by semicolons, commas, or line breaks.
+      </p>
+
+      <!-- Quick Preset Buttons -->
+      <div class="flex flex-wrap gap-2 text-xs">
+        <span class="text-slate-500 self-center text-[11px]">Load:</span>
+        <button id="load-list-1-btn" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300">
+          List 1 (93 items)
+        </button>
+        <button id="load-list-2-btn" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300">
+          List 2 (100 items)
+        </button>
+        <button id="clear-master-btn" class="px-2.5 py-1 rounded bg-rose-950/40 hover:bg-rose-900/50 border border-rose-800/40 text-rose-300">
+          Clear
+        </button>
+      </div>
+
+      <textarea id="master-list-input" rows="4" class="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs font-mono text-emerald-400 focus:outline-none focus:border-emerald-500 resize-none" placeholder="e.g. 1690032;1884022;1888811"></textarea>
+
+      <div class="flex items-center justify-between text-xs">
+        <span id="master-count-badge" class="text-slate-400">0 expected serials</span>
+        <button id="save-master-btn" class="px-4 py-2 bg-emerald-600 active:bg-emerald-500 text-white font-bold rounded-lg shadow-lg shadow-emerald-900/30">
+          Save Master List
+        </button>
+      </div>
+    </div>
+
+    <!-- AUDIT SUMMARY SCORECARD -->
+    <div class="grid grid-cols-3 gap-2.5">
+      <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-3 text-center relative overflow-hidden">
+        <div class="text-[10px] font-bold tracking-wider uppercase text-slate-400 mb-0.5">Found / Valid</div>
+        <div class="text-2xl font-black text-emerald-400 flex items-center justify-center gap-1">
+          <span id="stat-found">0</span>
+          <span class="text-xs text-slate-500 font-normal">/ <span id="stat-total">0</span></span>
+        </div>
+        <div class="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+          <div id="stat-progress-bar" class="bg-emerald-500 h-full w-0 transition-all duration-300"></div>
+        </div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-3 text-center">
+        <div class="text-[10px] font-bold tracking-wider uppercase text-slate-400 mb-0.5">Remaining</div>
+        <div id="stat-missing" class="text-2xl font-black text-amber-400">0</div>
+        <div class="text-[10px] text-slate-500 mt-2">Missing targets</div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-3 text-center">
+        <div class="text-[10px] font-bold tracking-wider uppercase text-slate-400 mb-0.5">Extra / Rogue</div>
+        <div id="stat-extra" class="text-2xl font-black text-cyan-400">0</div>
+        <div class="text-[10px] text-slate-500 mt-2">Not in list</div>
+      </div>
+    </div>
+
+    <!-- CAMERA SCANNER VIEWPORT CARD -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 shadow-xl space-y-3 relative">
+      <div class="flex items-center justify-between px-1">
+        <div class="flex items-center gap-2">
+          <span class="relative flex h-2.5 w-2.5">
+            <span id="scanner-ping" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span id="scanner-dot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+          </span>
+          <span class="text-xs font-bold uppercase tracking-wider text-slate-300">Camera Feed</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <!-- Audio beep toggle -->
+          <button id="toggle-sound-btn" class="w-7 h-7 rounded-lg bg-slate-800 border border-slate-700 text-emerald-400 flex items-center justify-center text-xs" title="Toggle Sound Feedback">
+            <i class="fa-solid fa-volume-high"></i>
+          </button>
+          <!-- Switch / restart camera -->
+          <button id="camera-power-btn" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-600 text-white active:bg-emerald-500 flex items-center gap-1.5 shadow">
+            <i class="fa-solid fa-camera"></i>
+            <span id="camera-power-text">Active</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- CAMERA STREAM & OVERLAY -->
+      <div class="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center">
+        <!-- Laser effect -->
+        <div id="scanner-laser-line" class="scanner-laser"></div>
+
+        <!-- Video Target -->
+        <div id="reader" class="w-full h-full"></div>
+
+        <!-- Scan guide reticle -->
+        <div class="absolute inset-0 pointer-events-none flex items-center justify-center p-6">
+          <div class="w-full max-w-[280px] h-[140px] border-2 border-dashed border-emerald-400/60 rounded-xl relative">
+            <div class="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-emerald-400"></div>
+            <div class="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-emerald-400"></div>
+            <div class="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-emerald-400"></div>
+            <div class="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-emerald-400"></div>
+            <div class="text-[10px] text-center w-full text-emerald-300/80 font-mono tracking-wider absolute bottom-2 font-bold drop-shadow">
+              ALIGN BARCODE OR SERIAL
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- QUICK MANUAL INPUT (Fallback for damaged labels) -->
+      <form id="manual-scan-form" class="flex gap-2 pt-1" onsubmit="return false;">
+        <div class="relative flex-1">
+          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 text-xs">
+            <i class="fa-solid fa-keyboard"></i>
+          </div>
+          <input
+            type="text"
+            id="manual-input"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            autocomplete="off"
+            placeholder="Manual serial entry (e.g. 1690032)..."
+            class="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-700/80 rounded-xl text-sm font-mono text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
+          />
+        </div>
+        <button
+          type="submit"
+          id="manual-add-btn"
+          class="px-5 py-2.5 bg-emerald-600 active:bg-emerald-500 text-white font-bold text-sm rounded-xl shadow-md flex items-center gap-1.5 shrink-0"
+        >
+          <i class="fa-solid fa-plus text-xs"></i> Add
+        </button>
+      </form>
+    </div>
+
+    <!-- QUICK ACTION BUTTONS -->
+    <div class="grid grid-cols-2 gap-2">
+      <button id="copy-scanned-btn" class="w-full py-2.5 px-3 rounded-xl bg-slate-800/90 hover:bg-slate-800 border border-slate-700 active:border-emerald-500 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2">
+        <i class="fa-regular fa-copy text-emerald-400"></i>
+        <span>Copy Scanned (<span id="btn-count-scanned">0</span>)</span>
+      </button>
+
+      <button id="copy-missing-btn" class="w-full py-2.5 px-3 rounded-xl bg-slate-800/90 hover:bg-slate-800 border border-slate-700 active:border-amber-500 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2">
+        <i class="fa-solid fa-clipboard-check text-amber-400"></i>
+        <span>Copy Missing (<span id="btn-count-missing">0</span>)</span>
+      </button>
+    </div>
+
+    <!-- TABS: SCANNED LOG vs MISSING AUDIT LIST -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 shadow-xl">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
+        <div class="flex gap-2">
+          <button id="tab-scanned-btn" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+            Scanned Items (<span id="tab-count-scanned">0</span>)
+          </button>
+          <button id="tab-missing-btn" class="px-3 py-1.5 text-xs font-bold rounded-lg text-slate-400 hover:text-slate-200 border border-transparent">
+            Remaining Target (<span id="tab-count-missing">0</span>)
+          </button>
+        </div>
+
+        <button id="export-txt-btn" title="Download Text Export" class="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded bg-slate-800 border border-slate-700 flex items-center gap-1">
+          <i class="fa-solid fa-download text-[10px]"></i> Export
+        </button>
+      </div>
+
+      <!-- SCANNED LIST VIEW -->
+      <div id="view-scanned-container" class="space-y-2 max-h-72 overflow-y-auto pr-1">
+        <!-- Empty State -->
+        <div id="scanned-empty-state" class="py-8 text-center text-slate-500 text-xs">
+          <i class="fa-solid fa-barcode text-3xl mb-2 opacity-30 block"></i>
+          No items scanned yet. Point the camera at a barcode or enter manually above.
+        </div>
+        <ul id="scanned-items-list" class="space-y-2"></ul>
+      </div>
+
+      <!-- MISSING TARGETS VIEW -->
+      <div id="view-missing-container" class="hidden space-y-2 max-h-72 overflow-y-auto pr-1">
+        <!-- Empty State -->
+        <div id="missing-empty-state" class="py-8 text-center text-slate-500 text-xs">
+          <i class="fa-solid fa-circle-check text-3xl mb-2 text-emerald-500/40 block"></i>
+          All target items have been found or no master list is configured!
+        </div>
+        <ul id="missing-items-list" class="space-y-1.5"></ul>
+      </div>
+    </div>
+  </main>
+
+  <!-- JAVASCRIPT LOGIC -->
+  <script>
+    // PRE-LOADED LISTS FROM YOUR DATA
+    const PRESET_LIST_1 = "1684316;1684643;1686161;1686164;1686167;1686939;1687628;1688192;1688256;1688560;1688565;1688570;1688644;1688849;1689513;1689573;1689685;1689833;1690005;1690007;1690017;1690032;1690037;1690038;1690039;1690043;1690045;1690072;1690073;1690081;1690082;1690087;1690096;1690097;1690101;1690124;1690131;1690143;1690151;1690258;1690307;1690381;1690384;1690385;1690403;1690438;1690490;1690664;1690892;1690939;1691060;1867077;1867149;1867181;1867183;1867241;1867691;1867715;1868091;1868417;1870345;1870356;1870419;1873137;1875207;1882605;1883208;1884001;1884003;1884059;1884063;1884258;1884266;1884290;1884296;1884300;1884394;1884421;1884452;1884463;1884469;1884492;1885078;1885252;1885254;1885257;1885259;1885264;1885268;1885272;1885285;1885291;1885296";
+    const PRESET_LIST_2 = "1873137;1867181;1875207;1885252;1884001;1867149;1884463;1884059;1884022;1884452;1885259;1884394;1884266;1885285;1885272;1883208;1867715;1885078;1884258;1690032;1884290;16863119;1885268;1867241;1868091;1690131;1690039;1690017;1690082;1690081;1688192;1688644;1689685;1690124;1690307;1690072;1690043;1690892;1690037;1684643;1687628;1688256;1690939;1690143;1690385;1691060;1690403;1690381;1884469;1867691;1884003;1870345;18704773;1884296;1885257;1884492;1884300;1870419;1884421;1884063;1885254;1882605;1867183;1870356;1853190;1885291;1867077;1689833;1690490;1690097;1885264;1690096;1690073;1688570;1686164;1685120;1690038;1688565;1688849;1689573;1690087;1684316;1690151;1686167;1690045;1686161;1690005;1690007;1686939;1688560;1688256;1690438;1689513;1690101;1690384;1690664;1690258;1885296;1868417;1888811";
+
+    // APPLICATION STATE
+    let masterSet = new Set();
+    let scannedList = []; // Array of { code: string, timestamp: Date, status: 'expected' | 'extra' }
+    let scannedSet = new Set();
+    let html5QrCode = null;
+    let isCameraActive = false;
+    let soundEnabled = true;
+    let toastTimeout = null;
+    let audioCtx = null;
+
+    // LOCAL STORAGE KEYS
+    const STORAGE_KEY_MASTER = 'scanaudit_master_list';
+    const STORAGE_KEY_SCANNED = 'scanaudit_scanned_items';
+
+    // INITIALIZATION
+    window.addEventListener('DOMContentLoaded', () => {
+      loadSavedState();
+      setupEventListeners();
+      initAudio();
+      updateAuditUI();
+      // Auto-start camera on mobile browsers
+      startCamera();
+    });
+
+    // WEBAUDIO SYNTHESIZER (No external mp3 assets needed)
+    function initAudio() {
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContext();
+      } catch (e) {
+        console.warn("Web Audio not supported.");
+      }
+    }
+
+    function playBeep(type = 'success') {
+      if (!soundEnabled) return;
+      if (!audioCtx) initAudio();
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      if (!audioCtx) return;
+
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      const now = audioCtx.currentTime;
+
+      if (type === 'success') {
+        // High crisp beep
+        osc.frequency.setValueAtTime(880, now); // A5
+        osc.frequency.exponentialRampToValueAtTime(1760, now + 0.08); // A6
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+        osc.start(now);
+        osc.stop(now + 0.12);
+      } else if (type === 'duplicate') {
+        // Double low buzz
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(300, now);
+        gain.gain.setValueAtTime(0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+        osc.start(now);
+        osc.stop(now + 0.25);
+      } else if (type === 'extra') {
+        // Multi-tone chime
+        osc.frequency.setValueAtTime(659.25, now); // E5
+        osc.frequency.setValueAtTime(783.99, now + 0.08); // G5
+        gain.gain.setValueAtTime(0.25, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+      }
+
+      // Haptic feedback for Android / supported iOS
+      if (navigator.vibrate) {
+        if (type === 'success') navigator.vibrate(50);
+        else if (type === 'duplicate') navigator.vibrate([100, 50, 100]);
+        else if (type === 'extra') navigator.vibrate([60, 40, 60]);
+      }
+    }
+
+    // STATE MANAGEMENT
+    function loadSavedState() {
+      // Load Master List (defaults to List 2 if not saved yet)
+      const savedMaster = localStorage.getItem(STORAGE_KEY_MASTER);
+      if (savedMaster !== null) {
+        parseAndSetMaster(savedMaster);
+      } else {
+        parseAndSetMaster(PRESET_LIST_2);
+      }
+
+      // Load Scanned items
+      const savedScanned = localStorage.getItem(STORAGE_KEY_SCANNED);
+      if (savedScanned) {
+        try {
+          const parsed = JSON.parse(savedScanned);
+          if (Array.isArray(parsed)) {
+            scannedList = parsed;
+            scannedSet = new Set(scannedList.map(item => item.code));
+          }
+        } catch (e) {
+          console.error("Failed to parse local scanned data", e);
+        }
+      }
+    }
+
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY_SCANNED, JSON.stringify(scannedList));
+      } catch (e) {
+        console.warn("Storage quota or disabled", e);
+      }
+    }
+
+    function parseAndSetMaster(rawText) {
+      const items = rawText
+        .split(/[;\r\n,]+/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+
+      masterSet = new Set(items);
+      document.getElementById('master-list-input').value = items.join(';');
+      document.getElementById('master-count-badge').textContent = `${masterSet.size} expected serials`;
+      try {
+        localStorage.setItem(STORAGE_KEY_MASTER, items.join(';'));
+      } catch (e) {}
+    }
+
+    // ITEM PROCESSING ENGINE
+    function processCodeScanned(code) {
+      if (!code) return;
+      const cleanCode = String(code).trim();
+      if (cleanCode.length === 0) return;
+
+      // 1. Check for Duplicate
+      if (scannedSet.has(cleanCode)) {
+        playBeep('duplicate');
+        showToast('Duplicate Scanned!', cleanCode, 'duplicate');
+        return;
+      }
+
+      // 2. Identify if Target / Master item or Extra
+      const isExpected = masterSet.has(cleanCode);
+      const status = isExpected ? 'expected' : 'extra';
+
+      // 3. Register entry
+      scannedSet.add(cleanCode);
+      scannedList.unshift({
+        code: cleanCode,
+        timestamp: new Date().toISOString(),
+        status: status
+      });
+
+      // 4. Feedback
+      if (isExpected) {
+        playBeep('success');
+        showToast('Target Item Scanned', cleanCode, 'success');
+      } else {
+        playBeep('extra');
+        showToast('Extra / Not in Master List', cleanCode, 'extra');
+      }
+
+      saveState();
+      updateAuditUI();
+    }
+
+    function deleteScannedItem(index) {
+      if (index < 0 || index >= scannedList.length) return;
+      const removed = scannedList.splice(index, 1)[0];
+      scannedSet.delete(removed.code);
+      saveState();
+      updateAuditUI();
+      showToast('Item Removed', removed.code, 'neutral');
+    }
+
+    // UI RENDERERS
+    function updateAuditUI() {
+      // Statistics calculations
+      const totalExpected = masterSet.size;
+      let foundCount = 0;
+      let extraCount = 0;
+
+      scannedList.forEach(item => {
+        if (masterSet.has(item.code)) {
+          foundCount++;
+        } else {
+          extraCount++;
+        }
+      });
+
+      const missingCount = Math.max(0, totalExpected - foundCount);
+      const progressPercent = totalExpected > 0 ? Math.min(100, Math.round((foundCount / totalExpected) * 100)) : 0;
+
+      // Update stat cards
+      document.getElementById('stat-found').textContent = foundCount;
+      document.getElementById('stat-total').textContent = totalExpected;
+      document.getElementById('stat-missing').textContent = missingCount;
+      document.getElementById('stat-extra').textContent = extraCount;
+      document.getElementById('stat-progress-bar').style.width = `${progressPercent}%`;
+
+      // Update tab & button counts
+      document.getElementById('btn-count-scanned').textContent = scannedList.length;
+      document.getElementById('btn-count-missing').textContent = missingCount;
+      document.getElementById('tab-count-scanned').textContent = scannedList.length;
+      document.getElementById('tab-count-missing').textContent = missingCount;
+
+      renderScannedItems();
+      renderMissingItems();
+    }
+
+    function renderScannedItems() {
+      const listEl = document.getElementById('scanned-items-list');
+      const emptyEl = document.getElementById('scanned-empty-state');
+      listEl.innerHTML = '';
+
+      if (scannedList.length === 0) {
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+      emptyEl.classList.add('hidden');
+
+      scannedList.forEach((item, index) => {
+        const li = document.createElement('li');
+        const isTarget = masterSet.has(item.code);
+        
+        li.className = "flex items-center justify-between p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 shadow-sm transition-all";
+        
+        const badgeColor = isTarget
+          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+          : "bg-cyan-500/10 text-cyan-400 border-cyan-500/30";
+        const badgeText = isTarget ? "MATCH" : "EXTRA";
+
+        li.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${badgeColor}">
+              ${badgeText}
+            </span>
+            <div class="truncate">
+              <span class="font-mono text-sm font-semibold tracking-wider text-slate-100">${item.code}</span>
+              <span class="text-[10px] text-slate-500 ml-2">${new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+            </div>
+          </div>
+          <button data-index="${index}" class="delete-item-btn text-slate-500 hover:text-rose-400 p-1.5 rounded-lg active:bg-slate-800 transition-colors">
+            <i class="fa-solid fa-trash-can text-xs"></i>
+          </button>
+        `;
+        listEl.appendChild(li);
+      });
+
+      // Attach delete click handlers
+      listEl.querySelectorAll('.delete-item-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const idx = parseInt(btn.getAttribute('data-index'), 10);
+          deleteScannedItem(idx);
+        });
+      });
+    }
+
+    function renderMissingItems() {
+      const listEl = document.getElementById('missing-items-list');
+      const emptyEl = document.getElementById('missing-empty-state');
+      listEl.innerHTML = '';
+
+      // Missing = items in masterSet that are not yet scanned
+      const missingList = [];
+      masterSet.forEach(code => {
+        if (!scannedSet.has(code)) {
+          missingList.push(code);
+        }
+      });
+
+      if (missingList.length === 0) {
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+      emptyEl.classList.add('hidden');
+
+      missingList.forEach(code => {
+        const li = document.createElement('li');
+        li.className = "flex items-center justify-between py-2 px-3 rounded-lg bg-slate-950/40 border border-slate-800/60 text-xs font-mono";
+        li.innerHTML = `
+          <span class="text-slate-300 font-medium">${code}</span>
+          <button data-code="${code}" class="quick-add-missing px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px] flex items-center gap-1 active:bg-emerald-600 active:text-white">
+            <i class="fa-solid fa-check text-[10px]"></i> Mark Scanned
+          </button>
+        `;
+        listEl.appendChild(li);
+      });
+
+      listEl.querySelectorAll('.quick-add-missing').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const code = btn.getAttribute('data-code');
+          processCodeScanned(code);
+        });
+      });
+    }
+
+    // TOAST NOTIFICATION
+    function showToast(title, message, type = 'success') {
+      const toast = document.getElementById('notification-toast');
+      const toastIcon = document.getElementById('toast-icon');
+      const toastTitle = document.getElementById('toast-title');
+      const toastMsg = document.getElementById('toast-message');
+
+      if (toastTimeout) clearTimeout(toastTimeout);
+
+      // Colors & Icons
+      toast.className = "fixed top-3 left-4 right-4 z-50 rounded-xl p-3 shadow-2xl flex items-center gap-3 border backdrop-blur-md transition-transform duration-200";
+      
+      if (type === 'success') {
+        toast.classList.add('bg-emerald-950/90', 'border-emerald-500/60', 'text-white');
+        toastIcon.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-400"></i>`;
+        toastTitle.className = "text-[10px] font-bold uppercase tracking-wider text-emerald-300";
+      } else if (type === 'duplicate') {
+        toast.classList.add('bg-rose-950/90', 'border-rose-500/60', 'text-white');
+        toastIcon.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-rose-400 animate-pulse"></i>`;
+        toastTitle.className = "text-[10px] font-bold uppercase tracking-wider text-rose-300";
+      } else if (type === 'extra') {
+        toast.classList.add('bg-cyan-950/90', 'border-cyan-500/60', 'text-white');
+        toastIcon.innerHTML = `<i class="fa-solid fa-circle-question text-cyan-400"></i>`;
+        toastTitle.className = "text-[10px] font-bold uppercase tracking-wider text-cyan-300";
+      } else {
+        toast.classList.add('bg-slate-900/90', 'border-slate-700', 'text-slate-200');
+        toastIcon.innerHTML = `<i class="fa-solid fa-info-circle text-slate-400"></i>`;
+        toastTitle.className = "text-[10px] font-bold uppercase tracking-wider text-slate-400";
+      }
+
+      toastTitle.textContent = title;
+      toastMsg.textContent = message;
+
+      toast.classList.remove('toast-hidden');
+      toast.classList.add('toast-visible');
+
+      toastTimeout = setTimeout(() => {
+        toast.classList.remove('toast-visible');
+        toast.classList.add('toast-hidden');
+      }, 2200);
+    }
+
+    // HTML5-QRCODE CAMERA INTEGRATION
+    function startCamera() {
+      if (html5QrCode && isCameraActive) return;
+
+      const formats = [
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.QR_CODE
+      ];
+
+      html5QrCode = new Html5Qrcode("reader", { formatsToSupport: formats, verbose: false });
+
+      const config = {
+        fps: 20,
+        qrbox: { width: 270, height: 130 },
+        aspectRatio: 1.333333,
+        videoConstraints: {
+          facingMode: { ideal: "environment" },
+          focusMode: "continuous"
+        }
+      };
+
+      html5QrCode.start(
+        { facingMode: "environment" },
+        config,
+        (decodedText, decodedResult) => {
+          // Debounce rapid continuous scanning of identical code
+          processCodeScanned(decodedText);
+        },
+        (errorMessage) => {
+          // Frame by frame scanner misses are normal, keep quiet
+        }
+      ).then(() => {
+        isCameraActive = true;
+        updateCameraUI(true);
+      }).catch(err => {
+        console.warn("Camera start failed:", err);
+        updateCameraUI(false);
+        showToast("Camera Offline", "Use manual entry or tap Camera button", "neutral");
+      });
+    }
+
+    function stopCamera() {
+      if (!html5QrCode || !isCameraActive) return;
+      html5QrCode.stop().then(() => {
+        isCameraActive = false;
+        updateCameraUI(false);
+      }).catch(err => console.error("Error stopping camera", err));
+    }
+
+    function updateCameraUI(active) {
+      const ping = document.getElementById('scanner-ping');
+      const dot = document.getElementById('scanner-dot');
+      const text = document.getElementById('camera-power-text');
+      const laser = document.getElementById('scanner-laser-line');
+
+      if (active) {
+        ping.classList.remove('hidden');
+        dot.className = "relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500";
+        text.textContent = "Stop";
+        laser.style.display = "block";
+      } else {
+        ping.classList.add('hidden');
+        dot.className = "relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500";
+        text.textContent = "Start";
+        laser.style.display = "none";
+      }
+    }
+
+    // CLIPBOARD UTILITY WITH FALLBACK
+    function copyTextToClipboard(text, successTitle = "Copied!") {
+      if (!text || text.trim().length === 0) {
+        showToast("Nothing to copy", "List is currently empty", "neutral");
+        return;
+      }
+
+      // Try modern clipboard API, fallback to execCommand for iOS iframe safety
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => {
+          showToast(successTitle, `${text.split(';').length} items copied to clipboard`, "success");
+        }).catch(() => {
+          fallbackCopy(text, successTitle);
+        });
+      } else {
+        fallbackCopy(text, successTitle);
+      }
+    }
+
+    function fallbackCopy(text, successTitle) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        showToast(successTitle, `${text.split(';').length} items copied to clipboard`, "success");
+      } catch (err) {
+        showToast("Copy Failed", "Please manually highlight and copy", "duplicate");
+      }
+      document.body.removeChild(textarea);
+    }
+
+    // EVENT LISTENERS BINDING
+    function setupEventListeners() {
+      // Manual Add Form
+      const manualForm = document.getElementById('manual-scan-form');
+      const manualInput = document.getElementById('manual-input');
+
+      manualForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const val = manualInput.value.trim();
+        if (val) {
+          processCodeScanned(val);
+          manualInput.value = '';
+          manualInput.blur(); // Dismiss mobile keyboard
+        }
+      });
+
+      // Sound Toggle
+      const soundBtn = document.getElementById('toggle-sound-btn');
+      soundBtn.addEventListener('click', () => {
+        soundEnabled = !soundEnabled;
+        soundBtn.innerHTML = soundEnabled ? '<i class="fa-solid fa-volume-high"></i>' : '<i class="fa-solid fa-volume-xmark text-slate-500"></i>';
+        showToast("Audio Alerts", soundEnabled ? "Enabled" : "Muted", "neutral");
+      });
+
+      // Camera Toggle
+      document.getElementById('camera-power-btn').addEventListener('click', () => {
+        if (isCameraActive) {
+          stopCamera();
+        } else {
+          startCamera();
+        }
+      });
+
+      // Tabs: Scanned vs Missing
+      const tabScanned = document.getElementById('tab-scanned-btn');
+      const tabMissing = document.getElementById('tab-missing-btn');
+      const viewScanned = document.getElementById('view-scanned-container');
+      const viewMissing = document.getElementById('view-missing-container');
+
+      tabScanned.addEventListener('click', () => {
+        tabScanned.className = "px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+        tabMissing.className = "px-3 py-1.5 text-xs font-bold rounded-lg text-slate-400 hover:text-slate-200 border border-transparent";
+        viewScanned.classList.remove('hidden');
+        viewMissing.classList.add('hidden');
+      });
+
+      tabMissing.addEventListener('click', () => {
+        tabMissing.className = "px-3 py-1.5 text-xs font-bold rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30";
+        tabScanned.className = "px-3 py-1.5 text-xs font-bold rounded-lg text-slate-400 hover:text-slate-200 border border-transparent";
+        viewMissing.classList.remove('hidden');
+        viewScanned.classList.add('hidden');
+      });
+
+      // Master List Modal Controls
+      const modal = document.getElementById('master-list-modal');
+      document.getElementById('toggle-list-config-btn').addEventListener('click', () => {
+        modal.classList.toggle('hidden');
+      });
+      document.getElementById('close-config-btn').addEventListener('click', () => {
+        modal.classList.add('hidden');
+      });
+
+      // Master Preset Buttons
+      document.getElementById('load-list-1-btn').addEventListener('click', () => {
+        parseAndSetMaster(PRESET_LIST_1);
+        updateAuditUI();
+        showToast("Loaded List 1", "93 expected serials set", "neutral");
+      });
+      document.getElementById('load-list-2-btn').addEventListener('click', () => {
+        parseAndSetMaster(PRESET_LIST_2);
+        updateAuditUI();
+        showToast("Loaded List 2", "100 items set", "neutral");
+      });
+      document.getElementById('clear-master-btn').addEventListener('click', () => {
+        parseAndSetMaster("");
+        updateAuditUI();
+        showToast("Cleared Target List", "0 expected items", "neutral");
+      });
+
+      document.getElementById('save-master-btn').addEventListener('click', () => {
+        const val = document.getElementById('master-list-input').value;
+        parseAndSetMaster(val);
+        modal.classList.add('hidden');
+        updateAuditUI();
+        showToast("Master List Updated", `${masterSet.size} items ready for audit`, "success");
+      });
+
+      // Clipboard Copies
+      document.getElementById('copy-scanned-btn').addEventListener('click', () => {
+        const text = scannedList.map(item => item.code).join(';');
+        copyTextToClipboard(text, "Scanned List Copied");
+      });
+
+      document.getElementById('copy-missing-btn').addEventListener('click', () => {
+        const missing = [];
+        masterSet.forEach(code => {
+          if (!scannedSet.has(code)) missing.push(code);
+        });
+        copyTextToClipboard(missing.join(';'), "Missing Items Copied");
+      });
+
+      // Export TXT
+      document.getElementById('export-txt-btn').addEventListener('click', () => {
+        const missing = [];
+        masterSet.forEach(code => {
+          if (!scannedSet.has(code)) missing.push(code);
+        });
+
+        let exportContent = `=== AUDIT REPORT: ${new Date().toLocaleString()} ===\n`;
+        exportContent += `Expected Total: ${masterSet.size}\n`;
+        exportContent += `Scanned Found: ${scannedList.filter(i => masterSet.has(i.code)).length}\n`;
+        exportContent += `Extra Items: ${scannedList.filter(i => !masterSet.has(i.code)).length}\n`;
+        exportContent += `Missing Items: ${missing.length}\n\n`;
+        exportContent += `--- SCANNED ITEMS (${scannedList.length}) ---\n`;
+        exportContent += scannedList.map(i => `${i.code} [${masterSet.has(i.code) ? 'MATCH' : 'EXTRA'}] - ${i.timestamp}`).join('\n');
+        exportContent += `\n\n--- REMAINING MISSING TARGETS (${missing.length}) ---\n`;
+        exportContent += missing.join('\n');
+
+        const blob = new Blob([exportContent], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Audit_Export_${Date.now()}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast("Export Downloaded", "Report saved to your device", "success");
+      });
+
+      // Reset Session
+      document.getElementById('reset-session-btn').addEventListener('click', () => {
+        // Confirmation banner via non-alert confirmation custom UI or quick double tap
+        if (scannedList.length === 0) {
+          showToast("Session Clean", "No items to reset", "neutral");
+          return;
+        }
+
+        // Lightweight confirm action
+        const confirmClear = window.confirm("Reset all currently scanned items for this session?");
+        if (confirmClear) {
+          scannedList = [];
+          scannedSet.clear();
+          saveState();
+          updateAuditUI();
+          showToast("Session Reset", "All scanned entries cleared", "neutral");
+        }
+      });
+    }
+  </script>
+</body>
+</html>
