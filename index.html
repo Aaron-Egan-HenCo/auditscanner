@@ -550,17 +550,45 @@
     }
 
     // ITEM PROCESSING ENGINE
-    function processCodeScanned(code) {
+    // Barra labels carry a 7-digit serial barcode with a 15-digit IMEI barcode
+    // directly below it. Anything that is exactly 15 digits is treated as an
+    // IMEI and dropped.
+    const IMEI_PATTERN = /^\d{15}$/;
+    const FEEDBACK_COOLDOWN_MS = 2500; // camera fires ~20x/sec on a code held in view
+    const lastFeedback = new Map();
+
+    function throttled(key) {
+      const now = Date.now();
+      const last = lastFeedback.get(key) || 0;
+      if (now - last < FEEDBACK_COOLDOWN_MS) return true;
+      lastFeedback.set(key, now);
+      return false;
+    }
+
+    function processCodeScanned(code, source = 'camera') {
       if (!code) return;
       const cleanCode = String(code).trim();
       if (cleanCode.length === 0) return;
 
-      // 1. Check for Duplicate
-      if (scannedSet.has(cleanCode)) {
-        playBeep('duplicate');
-        showToast('Duplicate Scanned!', cleanCode, 'duplicate');
+      // 0. Ignore IMEI barcodes
+      if (IMEI_PATTERN.test(cleanCode)) {
+        if (source === 'manual' || !throttled('imei:' + cleanCode)) {
+          showToast('IMEI Ignored', `${cleanCode} — scan the Serial barcode`, 'neutral');
+        }
         return;
       }
+
+      // 1. Check for Duplicate
+      if (scannedSet.has(cleanCode)) {
+        if (source === 'manual' || !throttled('dup:' + cleanCode)) {
+          playBeep('duplicate');
+          showToast('Duplicate Scanned!', cleanCode, 'duplicate');
+        }
+        return;
+      }
+      // Fresh accept: stop the very next camera frame of this same code
+      // from immediately reporting it as a duplicate
+      lastFeedback.set('dup:' + cleanCode, Date.now());
 
       // 2. Identify if Target / Master item or Extra
       const isExpected = masterSet.has(cleanCode);
@@ -713,7 +741,7 @@
       listEl.querySelectorAll('.quick-add-missing').forEach(btn => {
         btn.addEventListener('click', () => {
           const code = btn.getAttribute('data-code');
-          processCodeScanned(code);
+          processCodeScanned(code, 'manual');
         });
       });
     }
@@ -880,7 +908,7 @@
         e.preventDefault();
         const val = manualInput.value.trim();
         if (val) {
-          processCodeScanned(val);
+          processCodeScanned(val, 'manual');
           manualInput.value = '';
           manualInput.blur(); // Dismiss mobile keyboard
         }
