@@ -8,6 +8,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- html5-qrcode for cross-platform iOS Safari & Android camera scanning -->
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <!-- SheetJS for client-side .xlsx generation -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <!-- FontAwesome for crisp mobile icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
@@ -88,9 +90,13 @@
 
     <!-- Master List Toggle & Settings -->
     <div class="flex items-center space-x-2">
+      <button id="open-saved-btn" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 border border-slate-700 text-slate-200 active:bg-slate-700 flex items-center gap-1.5">
+        <i class="fa-solid fa-database text-cyan-400"></i>
+        <span>Saved</span>
+      </button>
       <button id="toggle-list-config-btn" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 border border-slate-700 text-slate-200 active:bg-slate-700 flex items-center gap-1.5">
         <i class="fa-solid fa-clipboard-list text-emerald-400"></i>
-        <span>Master List</span>
+        <span>Master</span>
       </button>
       <button id="reset-session-btn" title="Reset Session" class="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 active:text-rose-400 flex items-center justify-center">
         <i class="fa-solid fa-arrow-rotate-left text-xs"></i>
@@ -247,6 +253,35 @@
       </form>
     </div>
 
+    <!-- SESSION DETAILS + SAVE -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 shadow-xl space-y-2.5">
+      <div class="flex items-center justify-between px-1">
+        <span class="text-xs font-bold uppercase tracking-wider text-slate-300">Audit Session</span>
+        <span id="save-status" class="text-[10px] font-semibold text-slate-500">Not saved</span>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <input id="scanner-name-input" type="text" autocomplete="name" maxlength="60" placeholder="Your name *"
+          class="w-full px-3 py-2 bg-slate-950 border border-slate-700/80 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 select-text" />
+        <input id="location-input" type="text" maxlength="60" placeholder="Depot / location"
+          class="w-full px-3 py-2 bg-slate-950 border border-slate-700/80 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 select-text" />
+      </div>
+      <input id="notes-input" type="text" maxlength="200" placeholder="Notes (optional)"
+        class="w-full px-3 py-2 bg-slate-950 border border-slate-700/80 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 select-text" />
+      <div class="grid grid-cols-2 gap-2">
+        <button id="save-cloud-btn" class="w-full py-2.5 px-3 rounded-xl bg-emerald-600 active:bg-emerald-500 text-white text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30 disabled:opacity-50">
+          <i class="fa-solid fa-cloud-arrow-up"></i>
+          <span id="save-cloud-text">Save Audit</span>
+        </button>
+        <button id="download-session-xlsx-btn" class="w-full py-2.5 px-3 rounded-xl bg-slate-800 border border-slate-700 active:border-emerald-500 text-slate-200 text-sm font-semibold flex items-center justify-center gap-2">
+          <i class="fa-solid fa-file-excel text-emerald-400"></i>
+          <span>Excel (this)</span>
+        </button>
+      </div>
+      <button id="new-session-btn" class="w-full py-2 text-xs font-semibold rounded-xl text-slate-400 border border-dashed border-slate-700 active:text-white">
+        <i class="fa-solid fa-plus text-[10px]"></i> Start new audit
+      </button>
+    </div>
+
     <!-- QUICK ACTION BUTTONS -->
     <div class="grid grid-cols-2 gap-2">
       <button id="copy-scanned-btn" class="w-full py-2.5 px-3 rounded-xl bg-slate-800/90 hover:bg-slate-800 border border-slate-700 active:border-emerald-500 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2">
@@ -273,7 +308,7 @@
         </div>
 
         <button id="export-txt-btn" title="Download Text Export" class="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded bg-slate-800 border border-slate-700 flex items-center gap-1">
-          <i class="fa-solid fa-download text-[10px]"></i> Export
+          <i class="fa-solid fa-download text-[10px]"></i> TXT
         </button>
       </div>
 
@@ -299,11 +334,50 @@
     </div>
   </main>
 
+  <!-- SAVED AUDITS OVERLAY -->
+  <div id="saved-overlay" class="hidden fixed inset-0 z-[45] bg-slate-950/95 backdrop-blur-sm overflow-y-auto">
+    <div class="max-w-xl mx-auto p-4 space-y-3">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-database text-cyan-400"></i>
+          <span class="text-sm font-bold">Saved Audits</span>
+          <span id="saved-count" class="text-[10px] text-slate-500"></span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="refresh-saved-btn" title="Refresh" class="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center">
+            <i class="fa-solid fa-rotate text-xs"></i>
+          </button>
+          <button id="close-saved-btn" class="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 flex items-center justify-center">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2">
+        <input id="saved-filter-input" type="text" placeholder="Filter by name / depot / notes / date"
+          class="col-span-2 w-full px-3 py-2 bg-slate-900 border border-slate-700/80 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 select-text" />
+        <button id="download-selected-btn" class="py-2.5 rounded-xl bg-emerald-600 active:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40" disabled>
+          <i class="fa-solid fa-file-excel"></i> Selected (<span id="selected-count">0</span>)
+        </button>
+        <button id="download-all-btn" class="py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5">
+          <i class="fa-solid fa-layer-group text-cyan-400"></i> All scans (.xlsx)
+        </button>
+      </div>
+
+      <div id="saved-message" class="py-8 text-center text-slate-500 text-xs"></div>
+      <ul id="saved-list" class="space-y-2"></ul>
+    </div>
+  </div>
+
   <!-- JAVASCRIPT LOGIC -->
   <script>
     // PRE-LOADED LISTS FROM YOUR DATA
     const PRESET_LIST_1 = "1684316;1684643;1686161;1686164;1686167;1686939;1687628;1688192;1688256;1688560;1688565;1688570;1688644;1688849;1689513;1689573;1689685;1689833;1690005;1690007;1690017;1690032;1690037;1690038;1690039;1690043;1690045;1690072;1690073;1690081;1690082;1690087;1690096;1690097;1690101;1690124;1690131;1690143;1690151;1690258;1690307;1690381;1690384;1690385;1690403;1690438;1690490;1690664;1690892;1690939;1691060;1867077;1867149;1867181;1867183;1867241;1867691;1867715;1868091;1868417;1870345;1870356;1870419;1873137;1875207;1882605;1883208;1884001;1884003;1884059;1884063;1884258;1884266;1884290;1884296;1884300;1884394;1884421;1884452;1884463;1884469;1884492;1885078;1885252;1885254;1885257;1885259;1885264;1885268;1885272;1885285;1885291;1885296";
     const PRESET_LIST_2 = "1873137;1867181;1875207;1885252;1884001;1867149;1884463;1884059;1884022;1884452;1885259;1884394;1884266;1885285;1885272;1883208;1867715;1885078;1884258;1690032;1884290;16863119;1885268;1867241;1868091;1690131;1690039;1690017;1690082;1690081;1688192;1688644;1689685;1690124;1690307;1690072;1690043;1690892;1690037;1684643;1687628;1688256;1690939;1690143;1690385;1691060;1690403;1690381;1884469;1867691;1884003;1870345;18704773;1884296;1885257;1884492;1884300;1870419;1884421;1884063;1885254;1882605;1867183;1870356;1853190;1885291;1867077;1689833;1690490;1690097;1885264;1690096;1690073;1688570;1686164;1685120;1690038;1688565;1688849;1689573;1690087;1684316;1690151;1686167;1690045;1686161;1690005;1690007;1686939;1688560;1688256;1690438;1689513;1690101;1690384;1690664;1690258;1885296;1868417;1888811";
+
+    // ===== BACKEND CONFIG =====
+    // Paste your Google Apps Script Web App URL (ends in /exec) here. See README.md.
+    const APPS_SCRIPT_URL = "";
 
     // APPLICATION STATE
     let masterSet = new Set();
@@ -318,11 +392,21 @@
     // LOCAL STORAGE KEYS
     const STORAGE_KEY_MASTER = 'scanaudit_master_list';
     const STORAGE_KEY_SCANNED = 'scanaudit_scanned_items';
+    const STORAGE_KEY_SESSION = 'scanaudit_session_meta';
+    const STORAGE_KEY_USER = 'scanaudit_user';
+
+    // Session meta: { auditId, startedAt, lastSavedAt, dirty }
+    let session = null;
+    let savedAuditsCache = [];
+    let selectedAuditIds = new Set();
+    let isSaving = false;
 
     // INITIALIZATION
     window.addEventListener('DOMContentLoaded', () => {
       loadSavedState();
+      loadSessionMeta();
       setupEventListeners();
+      setupCloudListeners();
       initAudio();
       updateAuditUI();
       // Auto-start camera on mobile browsers
@@ -419,6 +503,15 @@
       } catch (e) {
         console.warn("Storage quota or disabled", e);
       }
+      if (session) {
+        session.dirty = true;
+        saveSessionMeta();
+        updateSaveStatusUI();
+      }
+    }
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
     function parseAndSetMaster(rawText) {
@@ -545,7 +638,7 @@
               ${badgeText}
             </span>
             <div class="truncate">
-              <span class="font-mono text-sm font-semibold tracking-wider text-slate-100">${item.code}</span>
+              <span class="font-mono text-sm font-semibold tracking-wider text-slate-100">${esc(item.code)}</span>
               <span class="text-[10px] text-slate-500 ml-2">${new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
             </div>
           </div>
@@ -588,8 +681,8 @@
         const li = document.createElement('li');
         li.className = "flex items-center justify-between py-2 px-3 rounded-lg bg-slate-950/40 border border-slate-800/60 text-xs font-mono";
         li.innerHTML = `
-          <span class="text-slate-300 font-medium">${code}</span>
-          <button data-code="${code}" class="quick-add-missing px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px] flex items-center gap-1 active:bg-emerald-600 active:text-white">
+          <span class="text-slate-300 font-medium">${esc(code)}</span>
+          <button data-code="${esc(code)}" class="quick-add-missing px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px] flex items-center gap-1 active:bg-emerald-600 active:text-white">
             <i class="fa-solid fa-check text-[10px]"></i> Mark Scanned
           </button>
         `;
@@ -894,14 +987,456 @@
           return;
         }
 
-        // Lightweight confirm action
-        const confirmClear = window.confirm("Reset all currently scanned items for this session?");
-        if (confirmClear) {
-          scannedList = [];
-          scannedSet.clear();
-          saveState();
-          updateAuditUI();
-          showToast("Session Reset", "All scanned entries cleared", "neutral");
+        startNewSession();
+      });
+    }
+
+    // ===================== SESSION META =====================
+    function newAuditId() {
+      const d = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+      const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+      return `A${stamp}-${rand}`;
+    }
+
+    function loadSessionMeta() {
+      try {
+        session = JSON.parse(localStorage.getItem(STORAGE_KEY_SESSION) || 'null');
+      } catch (e) { session = null; }
+      if (!session || !session.auditId) {
+        session = { auditId: newAuditId(), startedAt: new Date().toISOString(), lastSavedAt: null, dirty: scannedList.length > 0 };
+        saveSessionMeta();
+      }
+      try {
+        const user = JSON.parse(localStorage.getItem(STORAGE_KEY_USER) || '{}');
+        document.getElementById('scanner-name-input').value = user.name || '';
+        document.getElementById('location-input').value = user.location || '';
+      } catch (e) {}
+      document.getElementById('notes-input').value = session.notes || '';
+      updateSaveStatusUI();
+    }
+
+    function saveSessionMeta() {
+      try { localStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(session)); } catch (e) {}
+    }
+
+    function saveUserFields() {
+      try {
+        localStorage.setItem(STORAGE_KEY_USER, JSON.stringify({
+          name: document.getElementById('scanner-name-input').value.trim(),
+          location: document.getElementById('location-input').value.trim()
+        }));
+      } catch (e) {}
+      session.notes = document.getElementById('notes-input').value.trim();
+      saveSessionMeta();
+    }
+
+    function updateSaveStatusUI() {
+      const el = document.getElementById('save-status');
+      const txt = document.getElementById('save-cloud-text');
+      if (!el || !session) return;
+      if (isSaving) {
+        el.className = "text-[10px] font-semibold text-cyan-400";
+        el.textContent = "Saving…";
+        return;
+      }
+      if (session.lastSavedAt && !session.dirty) {
+        el.className = "text-[10px] font-semibold text-emerald-400";
+        el.innerHTML = `<i class="fa-solid fa-check"></i> Saved ${new Date(session.lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        txt.textContent = "Saved";
+      } else if (session.lastSavedAt && session.dirty) {
+        el.className = "text-[10px] font-semibold text-amber-400";
+        el.textContent = "Unsaved changes";
+        txt.textContent = "Update Save";
+      } else {
+        el.className = "text-[10px] font-semibold text-slate-500";
+        el.textContent = scannedList.length ? "Not saved yet" : "Not saved";
+        txt.textContent = "Save Audit";
+      }
+    }
+
+    function startNewSession() {
+      if (scannedList.length > 0 && session && (session.dirty || !session.lastSavedAt)) {
+        if (!window.confirm("This audit has unsaved scans. Clear it and start a new audit anyway?")) return;
+      } else if (scannedList.length > 0) {
+        if (!window.confirm("Clear the current scans and start a new audit? (It's already saved.)")) return;
+      }
+      scannedList = [];
+      scannedSet.clear();
+      session = { auditId: newAuditId(), startedAt: new Date().toISOString(), lastSavedAt: null, dirty: false, notes: '' };
+      document.getElementById('notes-input').value = '';
+      saveSessionMeta();
+      try { localStorage.setItem(STORAGE_KEY_SCANNED, '[]'); } catch (e) {}
+      updateAuditUI();
+      updateSaveStatusUI();
+      showToast("New Audit Started", session.auditId, "neutral");
+    }
+
+    function getMissingList() {
+      const missing = [];
+      masterSet.forEach(code => { if (!scannedSet.has(code)) missing.push(code); });
+      return missing;
+    }
+
+    // ===================== CLOUD (Google Apps Script) =====================
+    function backendReady() {
+      if (!APPS_SCRIPT_URL) {
+        showToast("Backend Not Set", "APPS_SCRIPT_URL is empty in index.html", "duplicate");
+        return false;
+      }
+      return true;
+    }
+
+    async function apiGet(params) {
+      const url = APPS_SCRIPT_URL + '?' + new URLSearchParams(params).toString();
+      const res = await fetch(url, { method: 'GET', redirect: 'follow' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Request failed');
+      return data;
+    }
+
+    async function apiPost(body) {
+      // text/plain avoids a CORS preflight, which Apps Script doesn't answer
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        redirect: 'follow',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Save failed');
+      return data;
+    }
+
+    async function saveToCloud() {
+      if (isSaving) return;
+      saveUserFields();
+      const name = document.getElementById('scanner-name-input').value.trim();
+      const location = document.getElementById('location-input').value.trim();
+      if (!name) {
+        showToast("Name Required", "Enter your name before saving", "duplicate");
+        document.getElementById('scanner-name-input').focus();
+        return;
+      }
+      if (scannedList.length === 0) {
+        showToast("Nothing to Save", "Scan some items first", "neutral");
+        return;
+      }
+      if (!backendReady()) return;
+
+      const found = scannedList.filter(i => masterSet.has(i.code)).length;
+      const missingList = getMissingList();
+      const payload = {
+        action: 'save',
+        audit: {
+          auditId: session.auditId,
+          startedAt: session.startedAt,
+          scannedBy: name,
+          location: location,
+          notes: session.notes || '',
+          masterCount: masterSet.size,
+          found: found,
+          extra: scannedList.length - found,
+          missing: missingList.length,
+          masterList: Array.from(masterSet),
+          missingList: missingList
+        },
+        // oldest first so the sheet reads in scan order
+        scans: scannedList.slice().reverse().map(i => ({
+          code: i.code,
+          status: masterSet.has(i.code) ? 'expected' : 'extra',
+          timestamp: i.timestamp
+        }))
+      };
+
+      const btn = document.getElementById('save-cloud-btn');
+      isSaving = true;
+      btn.disabled = true;
+      updateSaveStatusUI();
+      try {
+        const result = await apiPost(payload);
+        session.lastSavedAt = result.savedAt || new Date().toISOString();
+        session.dirty = false;
+        saveSessionMeta();
+        showToast(result.updated ? "Audit Updated" : "Audit Saved", `${result.rows} serials → ${session.auditId}`, "success");
+        playBeep('success');
+      } catch (err) {
+        console.error(err);
+        showToast("Save Failed", String(err.message || err), "duplicate");
+        playBeep('duplicate');
+      } finally {
+        isSaving = false;
+        btn.disabled = false;
+        updateSaveStatusUI();
+      }
+    }
+
+    // ===================== SAVED AUDITS SCREEN =====================
+    function openSavedOverlay() {
+      document.getElementById('saved-overlay').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+      loadSavedAudits();
+    }
+
+    function closeSavedOverlay() {
+      document.getElementById('saved-overlay').classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    async function loadSavedAudits() {
+      const msg = document.getElementById('saved-message');
+      const list = document.getElementById('saved-list');
+      list.innerHTML = '';
+      if (!APPS_SCRIPT_URL) {
+        msg.classList.remove('hidden');
+        msg.innerHTML = `<i class="fa-solid fa-plug-circle-xmark text-3xl mb-2 opacity-40 block"></i>Backend not configured.<br>Set <code class="text-cyan-400">APPS_SCRIPT_URL</code> in index.html.`;
+        return;
+      }
+      msg.classList.remove('hidden');
+      msg.innerHTML = `<i class="fa-solid fa-spinner fa-spin text-2xl mb-2 opacity-60 block"></i>Loading saved audits…`;
+      try {
+        const data = await apiGet({ action: 'list', limit: 300 });
+        savedAuditsCache = data.audits || [];
+        renderSavedAudits();
+      } catch (err) {
+        msg.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-2xl mb-2 text-rose-400 block"></i>Couldn't load: ${esc(err.message || err)}`;
+      }
+    }
+
+    function renderSavedAudits() {
+      const msg = document.getElementById('saved-message');
+      const list = document.getElementById('saved-list');
+      const filter = document.getElementById('saved-filter-input').value.trim().toLowerCase();
+      list.innerHTML = '';
+
+      const items = savedAuditsCache.filter(a => {
+        if (!filter) return true;
+        const d = a.savedAt ? new Date(a.savedAt) : null;
+        const hay = [a.scannedBy, a.location, a.notes, a.auditId, d ? d.toLocaleDateString() : ''].join(' ').toLowerCase();
+        return hay.includes(filter);
+      });
+
+      document.getElementById('saved-count').textContent = `${savedAuditsCache.length} total`;
+
+      if (items.length === 0) {
+        msg.classList.remove('hidden');
+        msg.innerHTML = `<i class="fa-solid fa-box-open text-3xl mb-2 opacity-30 block"></i>${savedAuditsCache.length ? 'No audits match that filter.' : 'No audits saved yet.'}`;
+      } else {
+        msg.classList.add('hidden');
+      }
+
+      items.forEach(a => {
+        const d = a.savedAt ? new Date(a.savedAt) : null;
+        const when = d ? d.toLocaleString([], { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+        const isCurrent = session && a.auditId === session.auditId;
+        const checked = selectedAuditIds.has(a.auditId);
+        const li = document.createElement('li');
+        li.className = `p-3 rounded-xl bg-slate-900 border ${isCurrent ? 'border-emerald-600/60' : 'border-slate-800'} flex items-start gap-3`;
+        li.innerHTML = `
+          <input type="checkbox" class="saved-select mt-1 w-4 h-4 accent-emerald-500 shrink-0" data-id="${esc(a.auditId)}" ${checked ? 'checked' : ''}>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-sm font-bold text-white">${esc(a.scannedBy || '—')}</span>
+              ${a.location ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">${esc(a.location)}</span>` : ''}
+              ${isCurrent ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">THIS DEVICE</span>` : ''}
+            </div>
+            <div class="text-[11px] text-slate-400 mt-0.5">${esc(when)}</div>
+            <div class="text-[11px] mt-1 flex gap-3 font-mono">
+              <span class="text-slate-300">${esc(a.totalScanned)} scanned</span>
+              <span class="text-emerald-400">${esc(a.found)}/${esc(a.masterCount)}</span>
+              <span class="text-cyan-400">+${esc(a.extra)}</span>
+              <span class="text-amber-400">-${esc(a.missing)}</span>
+            </div>
+            ${a.notes ? `<div class="text-[11px] text-slate-500 mt-1 truncate">${esc(a.notes)}</div>` : ''}
+            <div class="text-[9px] text-slate-600 font-mono mt-1">${esc(a.auditId)}</div>
+          </div>
+          <button class="saved-download shrink-0 w-9 h-9 rounded-lg bg-emerald-600/90 active:bg-emerald-500 text-white flex items-center justify-center" data-id="${esc(a.auditId)}" title="Download .xlsx">
+            <i class="fa-solid fa-file-arrow-down"></i>
+          </button>
+        `;
+        list.appendChild(li);
+      });
+
+      list.querySelectorAll('.saved-select').forEach(cb => {
+        cb.addEventListener('change', () => {
+          const id = cb.getAttribute('data-id');
+          if (cb.checked) selectedAuditIds.add(id); else selectedAuditIds.delete(id);
+          updateSelectedUI();
+        });
+      });
+      list.querySelectorAll('.saved-download').forEach(btn => {
+        btn.addEventListener('click', () => downloadAudits([btn.getAttribute('data-id')], btn));
+      });
+      updateSelectedUI();
+    }
+
+    function updateSelectedUI() {
+      document.getElementById('selected-count').textContent = selectedAuditIds.size;
+      document.getElementById('download-selected-btn').disabled = selectedAuditIds.size === 0;
+    }
+
+    async function downloadAudits(ids, btn) {
+      if (!backendReady() || ids.length === 0) return;
+      const original = btn ? btn.innerHTML : null;
+      if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+      try {
+        const results = [];
+        for (const id of ids) {
+          const data = await apiGet({ action: 'get', id });
+          results.push(data);
+        }
+        const audits = results.map(r => r.audit);
+        const scans = results.flatMap(r => r.scans);
+        const missing = results.flatMap(r => (r.audit.missingList || []).map(serial => ({ auditId: r.audit.auditId, serial, scannedBy: r.audit.scannedBy, location: r.audit.location })));
+        const fname = ids.length === 1
+          ? `Audit_${safeName(audits[0].scannedBy)}_${fileDate(audits[0].savedAt)}.xlsx`
+          : `Audits_${ids.length}_${fileDate(new Date().toISOString())}.xlsx`;
+        buildWorkbook({ audits, scans, missing }, fname);
+        showToast("Excel Downloaded", fname, "success");
+      } catch (err) {
+        console.error(err);
+        showToast("Download Failed", String(err.message || err), "duplicate");
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = original; }
+        updateSelectedUI();
+      }
+    }
+
+    async function downloadAllScans(btn) {
+      if (!backendReady()) return;
+      const original = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading…';
+      try {
+        const [scanData, listData] = await Promise.all([apiGet({ action: 'all' }), apiGet({ action: 'list', limit: 100000 })]);
+        const fname = `All_Scans_${fileDate(new Date().toISOString())}.xlsx`;
+        buildWorkbook({ audits: listData.audits || [], scans: scanData.scans || [], missing: null }, fname);
+        showToast("Excel Downloaded", `${(scanData.scans || []).length} rows`, "success");
+      } catch (err) {
+        console.error(err);
+        showToast("Download Failed", String(err.message || err), "duplicate");
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = original;
+      }
+    }
+
+    // ===================== EXCEL (SheetJS) =====================
+    // Pure-digit serials without a leading zero become real numbers so they
+    // paste cleanly into an existing numeric column; anything else stays text.
+    function serialCell(v) {
+      const s = String(v == null ? '' : v).trim();
+      return /^[1-9]\d{0,14}$/.test(s) ? Number(s) : s;
+    }
+
+    function dateCell(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return isNaN(d) ? String(iso) : d;
+    }
+
+    function safeName(s) {
+      return String(s || 'Unknown').replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 30) || 'Unknown';
+    }
+
+    function fileDate(iso) {
+      const d = iso ? new Date(iso) : new Date();
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
+    }
+
+    function sheetFromRows(header, rows, widths) {
+      const ws = XLSX.utils.aoa_to_sheet([header, ...rows], { cellDates: true, dateNF: 'dd/mm/yyyy hh:mm:ss' });
+      ws['!cols'] = widths.map(w => ({ wch: w }));
+      ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: header.length - 1 } }) };
+      return ws;
+    }
+
+    function buildWorkbook({ audits, scans, missing }, filename) {
+      if (typeof XLSX === 'undefined') {
+        showToast("Excel Library Missing", "SheetJS failed to load (offline?)", "duplicate");
+        return;
+      }
+      const wb = XLSX.utils.book_new();
+
+      // Sheet 1: Serials (the one to copy from)
+      const scanRows = scans.map(s => [serialCell(s.serial), s.status, dateCell(s.scannedAt), s.scannedBy || '', s.location || '', s.auditId]);
+      XLSX.utils.book_append_sheet(wb, sheetFromRows(
+        ['Serial', 'Status', 'Scanned At', 'Scanned By', 'Location', 'Audit ID'],
+        scanRows, [14, 9, 20, 18, 16, 24]
+      ), 'Serials');
+
+      // Sheet 2: Missing
+      if (missing) {
+        const missRows = missing.map(m => [serialCell(m.serial), m.scannedBy || '', m.location || '', m.auditId]);
+        XLSX.utils.book_append_sheet(wb, sheetFromRows(
+          ['Missing Serial', 'Audit By', 'Location', 'Audit ID'],
+          missRows, [16, 18, 16, 24]
+        ), 'Missing');
+      }
+
+      // Sheet 3: Audit summary
+      const sumRows = audits.map(a => [a.auditId, dateCell(a.savedAt), a.scannedBy || '', a.location || '', a.notes || '',
+        Number(a.totalScanned) || 0, Number(a.found) || 0, Number(a.masterCount) || 0, Number(a.extra) || 0, Number(a.missing) || 0]);
+      XLSX.utils.book_append_sheet(wb, sheetFromRows(
+        ['Audit ID', 'Saved At', 'Scanned By', 'Location', 'Notes', 'Scanned', 'Found', 'Expected', 'Extra', 'Missing'],
+        sumRows, [24, 20, 18, 16, 30, 9, 8, 9, 7, 8]
+      ), 'Audits');
+
+      XLSX.writeFile(wb, filename, { compression: true });
+    }
+
+    function downloadCurrentSessionXlsx() {
+      saveUserFields();
+      if (scannedList.length === 0 && masterSet.size === 0) {
+        showToast("Nothing to Export", "Scan some items first", "neutral");
+        return;
+      }
+      const name = document.getElementById('scanner-name-input').value.trim();
+      const location = document.getElementById('location-input').value.trim();
+      const found = scannedList.filter(i => masterSet.has(i.code)).length;
+      const missingList = getMissingList();
+      const now = new Date().toISOString();
+      const audit = {
+        auditId: session.auditId, savedAt: now, scannedBy: name, location, notes: session.notes || '',
+        totalScanned: scannedList.length, found, masterCount: masterSet.size, extra: scannedList.length - found, missing: missingList.length
+      };
+      const scans = scannedList.slice().reverse().map(i => ({
+        serial: i.code, status: masterSet.has(i.code) ? 'MATCH' : 'EXTRA', scannedAt: i.timestamp,
+        scannedBy: name, location, auditId: session.auditId
+      }));
+      const missing = missingList.map(serial => ({ serial, scannedBy: name, location, auditId: session.auditId }));
+      const fname = `Audit_${safeName(name)}_${fileDate(now)}.xlsx`;
+      buildWorkbook({ audits: [audit], scans, missing }, fname);
+      showToast("Excel Downloaded", fname, "success");
+    }
+
+    function setupCloudListeners() {
+      ['scanner-name-input', 'location-input', 'notes-input'].forEach(id => {
+        const el = document.getElementById(id);
+        el.addEventListener('change', () => {
+          saveUserFields();
+          if (session.lastSavedAt) { session.dirty = true; saveSessionMeta(); updateSaveStatusUI(); }
+        });
+        el.addEventListener('keydown', e => { if (e.key === 'Enter') el.blur(); });
+      });
+      document.getElementById('save-cloud-btn').addEventListener('click', saveToCloud);
+      document.getElementById('download-session-xlsx-btn').addEventListener('click', downloadCurrentSessionXlsx);
+      document.getElementById('new-session-btn').addEventListener('click', startNewSession);
+      document.getElementById('open-saved-btn').addEventListener('click', openSavedOverlay);
+      document.getElementById('close-saved-btn').addEventListener('click', closeSavedOverlay);
+      document.getElementById('refresh-saved-btn').addEventListener('click', loadSavedAudits);
+      document.getElementById('saved-filter-input').addEventListener('input', renderSavedAudits);
+      document.getElementById('download-selected-btn').addEventListener('click', e => downloadAudits(Array.from(selectedAuditIds), e.currentTarget));
+      document.getElementById('download-all-btn').addEventListener('click', e => downloadAllScans(e.currentTarget));
+
+      window.addEventListener('beforeunload', e => {
+        if (session && session.dirty && scannedList.length > 0 && APPS_SCRIPT_URL) {
+          e.preventDefault();
+          e.returnValue = '';
         }
       });
     }
