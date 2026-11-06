@@ -353,6 +353,26 @@
         </div>
       </div>
 
+      <div class="flex gap-2">
+        <button id="saved-tab-recent" class="flex-1 px-3 py-2 text-xs font-bold rounded-lg bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+          <i class="fa-solid fa-clock-rotate-left"></i> Recent
+        </button>
+        <button id="saved-tab-auditor" class="flex-1 px-3 py-2 text-xs font-bold rounded-lg text-slate-400 border border-slate-800">
+          <i class="fa-solid fa-user-check"></i> By Auditor
+        </button>
+      </div>
+
+      <!-- BY AUDITOR VIEW -->
+      <div id="auditor-view" class="hidden space-y-3">
+        <input id="auditor-input" type="text" list="auditor-names" autocomplete="off" placeholder="Type auditor name…"
+          class="w-full px-3 py-2.5 bg-slate-900 border border-slate-700/80 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 select-text" />
+        <datalist id="auditor-names"></datalist>
+        <div id="auditor-message" class="py-6 text-center text-slate-500 text-xs"></div>
+        <div id="auditor-groups" class="space-y-4"></div>
+      </div>
+
+      <!-- RECENT VIEW -->
+      <div id="recent-view" class="space-y-3">
       <div class="grid grid-cols-2 gap-2">
         <input id="saved-filter-input" type="text" placeholder="Filter by name / depot / notes / date"
           class="col-span-2 w-full px-3 py-2 bg-slate-900 border border-slate-700/80 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 select-text" />
@@ -366,6 +386,7 @@
 
       <div id="saved-message" class="py-8 text-center text-slate-500 text-xs"></div>
       <ul id="saved-list" class="space-y-2"></ul>
+      </div>
     </div>
   </div>
 
@@ -1201,6 +1222,8 @@
         const data = await apiGet({ action: 'list', limit: 300 });
         savedAuditsCache = data.audits || [];
         renderSavedAudits();
+        updateAuditorDatalist();
+        if (savedView === 'auditor') renderAuditorGroups();
       } catch (err) {
         msg.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-2xl mb-2 text-rose-400 block"></i>Couldn't load: ${esc(err.message || err)}`;
       }
@@ -1273,27 +1296,204 @@
       updateSelectedUI();
     }
 
+    // ===================== BY AUDITOR VIEW =====================
+    let savedView = 'recent';
+
+    function setSavedView(view) {
+      savedView = view;
+      const on = "flex-1 px-3 py-2 text-xs font-bold rounded-lg bg-cyan-500/20 text-cyan-400 border border-cyan-500/30";
+      const off = "flex-1 px-3 py-2 text-xs font-bold rounded-lg text-slate-400 border border-slate-800";
+      document.getElementById('saved-tab-recent').className = view === 'recent' ? on : off;
+      document.getElementById('saved-tab-auditor').className = view === 'auditor' ? on : off;
+      document.getElementById('recent-view').classList.toggle('hidden', view !== 'recent');
+      document.getElementById('auditor-view').classList.toggle('hidden', view !== 'auditor');
+      if (view === 'auditor') {
+        const input = document.getElementById('auditor-input');
+        if (!input.value) input.value = document.getElementById('scanner-name-input').value.trim();
+        renderAuditorGroups();
+      }
+    }
+
+    function normName(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+
+    function localDay(iso) {
+      const d = new Date(iso);
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    }
+
+    function auditDate(a) { return a.startedAt || a.savedAt; }
+
+    // Greedy 2-day windows: a group starts on the earliest audit day and takes
+    // in every audit on that day or the next calendar day. e.g. 1/11 + 2/11 -> one
+    // group, 3/11 starts a new one.
+    function groupByTwoDays(audits) {
+      const sorted = audits.filter(a => auditDate(a)).slice()
+        .sort((a, b) => auditDate(a).localeCompare(auditDate(b)));
+      const groups = [];
+      let cur = null;
+      sorted.forEach(a => {
+        const day = localDay(auditDate(a));
+        if (cur && (day - cur.start) / 86400000 < 2) {
+          cur.audits.push(a);
+          if (day > cur.end) cur.end = day;
+        } else {
+          cur = { start: day, end: day, audits: [a] };
+          groups.push(cur);
+        }
+      });
+      return groups.reverse(); // newest group first
+    }
+
+    function updateAuditorDatalist() {
+      const names = new Map();
+      savedAuditsCache.forEach(a => {
+        const n = normName(a.scannedBy);
+        if (n && !names.has(n)) names.set(n, String(a.scannedBy).trim());
+      });
+      document.getElementById('auditor-names').innerHTML =
+        Array.from(names.values()).sort().map(n => `<option value="${esc(n)}"></option>`).join('');
+    }
+
+    function renderAuditorGroups() {
+      const msg = document.getElementById('auditor-message');
+      const wrap = document.getElementById('auditor-groups');
+      wrap.innerHTML = '';
+      const q = normName(document.getElementById('auditor-input').value);
+
+      if (!q) {
+        msg.classList.remove('hidden');
+        msg.innerHTML = `<i class="fa-solid fa-user text-3xl mb-2 opacity-30 block"></i>Type an auditor's name to see their audits grouped by date.`;
+        return;
+      }
+
+      // Exact name match wins; otherwise partial match across all names
+      let matches = savedAuditsCache.filter(a => normName(a.scannedBy) === q);
+      if (matches.length === 0) matches = savedAuditsCache.filter(a => normName(a.scannedBy).includes(q));
+
+      if (matches.length === 0) {
+        msg.classList.remove('hidden');
+        msg.innerHTML = `<i class="fa-solid fa-user-slash text-3xl mb-2 opacity-30 block"></i>No audits found for "${esc(q)}".`;
+        return;
+      }
+      msg.classList.add('hidden');
+
+      // Group per person (in case of a partial match hitting several names), then by 2-day window
+      const byPerson = new Map();
+      matches.forEach(a => {
+        const k = normName(a.scannedBy);
+        if (!byPerson.has(k)) byPerson.set(k, { name: String(a.scannedBy).trim(), audits: [] });
+        byPerson.get(k).audits.push(a);
+      });
+
+      const fmt = d => d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+      const fdate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+      byPerson.forEach(person => {
+        const groups = groupByTwoDays(person.audits);
+        const totalScans = person.audits.reduce((s, a) => s + (Number(a.totalScanned) || 0), 0);
+        const section = document.createElement('div');
+        section.className = 'space-y-2';
+        section.innerHTML = `
+          <div class="flex items-center justify-between px-1">
+            <div>
+              <div class="text-sm font-bold text-white">${esc(person.name)}</div>
+              <div class="text-[11px] text-slate-400">${person.audits.length} audits · ${groups.length} date groups · ${totalScans} scans</div>
+            </div>
+            <button class="person-download px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-semibold flex items-center gap-1.5">
+              <i class="fa-solid fa-file-excel text-emerald-400"></i> All for ${esc(person.name.split(' ')[0])}
+            </button>
+          </div>`;
+        const allIds = person.audits.map(a => a.auditId);
+        section.querySelector('.person-download').addEventListener('click', e =>
+          downloadAudits(allIds, e.currentTarget, `Audits_${safeName(person.name)}_ALL_${fileDate()}.xlsx`));
+
+        groups.forEach(g => {
+          const range = g.start.getTime() === g.end.getTime() ? fmt(g.start) : `${fmt(g.start)} – ${fmt(g.end)}`;
+          const scans = g.audits.reduce((s, a) => s + (Number(a.totalScanned) || 0), 0);
+          const found = g.audits.reduce((s, a) => s + (Number(a.found) || 0), 0);
+          const locations = [...new Set(g.audits.map(a => a.location).filter(Boolean))].join(', ');
+          const ids = g.audits.map(a => a.auditId);
+          const card = document.createElement('div');
+          card.className = 'p-3 rounded-xl bg-slate-900 border border-slate-800';
+          card.innerHTML = `
+            <div class="flex items-start gap-3">
+              <div class="flex-1 min-w-0">
+                <div class="text-sm font-bold text-cyan-300">${esc(range)}</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">${g.audits.length} audit${g.audits.length > 1 ? 's' : ''} · ${scans} scans · ${found} matched${locations ? ' · ' + esc(locations) : ''}</div>
+              </div>
+              <button class="group-download shrink-0 px-3 h-9 rounded-lg bg-emerald-600/90 active:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5">
+                <i class="fa-solid fa-file-arrow-down"></i> .xlsx
+              </button>
+            </div>
+            <div class="mt-2 space-y-1">
+              ${g.audits.map(a => {
+                const t = new Date(auditDate(a)).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                return `<div class="flex items-center justify-between text-[11px] font-mono bg-slate-950/60 rounded-lg px-2 py-1.5">
+                  <span class="text-slate-300">${esc(t)}${a.location ? ' · ' + esc(a.location) : ''}</span>
+                  <span><span class="text-slate-300">${esc(a.totalScanned)}</span> <span class="text-emerald-400">${esc(a.found)}/${esc(a.masterCount)}</span> <span class="text-cyan-400">+${esc(a.extra)}</span></span>
+                </div>`;
+              }).join('')}
+            </div>`;
+          card.querySelector('.group-download').addEventListener('click', e =>
+            downloadAudits(ids, e.currentTarget, `Audit_${safeName(person.name)}_${fdate(g.start)}${g.end > g.start ? '_to_' + fdate(g.end) : ''}.xlsx`));
+          section.appendChild(card);
+        });
+        wrap.appendChild(section);
+      });
+    }
+
     function updateSelectedUI() {
       document.getElementById('selected-count').textContent = selectedAuditIds.size;
       document.getElementById('download-selected-btn').disabled = selectedAuditIds.size === 0;
     }
 
-    async function downloadAudits(ids, btn) {
+    // Fetch several audits in one request (needs Code.gs 'many' action);
+    // falls back to one request per audit if the deployed script is older.
+    async function fetchAudits(ids) {
+      try {
+        const data = await apiGet({ action: 'many', ids: ids.join(',') });
+        return data.results;
+      } catch (err) {
+        if (!/Unknown action/i.test(String(err.message))) throw err;
+        const results = [];
+        for (const id of ids) results.push(await apiGet({ action: 'get', id }));
+        return results;
+      }
+    }
+
+    async function downloadAudits(ids, btn, fnameOverride) {
       if (!backendReady() || ids.length === 0) return;
       const original = btn ? btn.innerHTML : null;
       if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
       try {
-        const results = [];
-        for (const id of ids) {
-          const data = await apiGet({ action: 'get', id });
-          results.push(data);
-        }
+        const results = (await fetchAudits(ids))
+          .sort((a, b) => (a.audit.startedAt || a.audit.savedAt || '').localeCompare(b.audit.startedAt || b.audit.savedAt || ''));
         const audits = results.map(r => r.audit);
-        const scans = results.flatMap(r => r.scans);
-        const missing = results.flatMap(r => (r.audit.missingList || []).map(serial => ({ auditId: r.audit.auditId, serial, scannedBy: r.audit.scannedBy, location: r.audit.location })));
-        const fname = ids.length === 1
+        let scans, missing;
+        if (results.length === 1) {
+          scans = results[0].scans;
+          missing = (audits[0].missingList || []).map(serial => ({ auditId: audits[0].auditId, serial, scannedBy: audits[0].scannedBy, location: audits[0].location }));
+        } else {
+          // Combined: one row per serial (first scan kept), and "still missing" =
+          // missing from any audit in the set AND not scanned in any audit in the set.
+          const seen = new Set();
+          scans = [];
+          results.forEach(r => r.scans.forEach(s => {
+            if (seen.has(s.serial)) return;
+            seen.add(s.serial);
+            scans.push(s);
+          }));
+          const missSeen = new Set();
+          missing = [];
+          results.forEach(r => (r.audit.missingList || []).forEach(serial => {
+            if (seen.has(serial) || missSeen.has(serial)) return;
+            missSeen.add(serial);
+            missing.push({ auditId: r.audit.auditId, serial, scannedBy: r.audit.scannedBy, location: r.audit.location });
+          }));
+        }
+        const fname = fnameOverride || (ids.length === 1
           ? `Audit_${safeName(audits[0].scannedBy)}_${fileDate(audits[0].savedAt)}.xlsx`
-          : `Audits_${ids.length}_${fileDate(new Date().toISOString())}.xlsx`;
+          : `Audits_${ids.length}_${fileDate(new Date().toISOString())}.xlsx`);
         buildWorkbook({ audits, scans, missing }, fname);
         showToast("Excel Downloaded", fname, "success");
       } catch (err) {
@@ -1430,6 +1630,9 @@
       document.getElementById('close-saved-btn').addEventListener('click', closeSavedOverlay);
       document.getElementById('refresh-saved-btn').addEventListener('click', loadSavedAudits);
       document.getElementById('saved-filter-input').addEventListener('input', renderSavedAudits);
+      document.getElementById('saved-tab-recent').addEventListener('click', () => setSavedView('recent'));
+      document.getElementById('saved-tab-auditor').addEventListener('click', () => setSavedView('auditor'));
+      document.getElementById('auditor-input').addEventListener('input', renderAuditorGroups);
       document.getElementById('download-selected-btn').addEventListener('click', e => downloadAudits(Array.from(selectedAuditIds), e.currentTarget));
       document.getElementById('download-all-btn').addEventListener('click', e => downloadAllScans(e.currentTarget));
 

@@ -35,6 +35,7 @@ function doGet(e) {
     if (action === 'ping') return json_({ ok: true, ts: new Date().toISOString() });
     if (action === 'list') return json_({ ok: true, audits: listAudits_(parseInt(p.limit, 10) || 200) });
     if (action === 'get') return json_(getAudit_(p.id));
+    if (action === 'many') return json_({ ok: true, results: getManyAudits_(String(p.ids || '').split(',').filter(Boolean)) });
     if (action === 'all') return json_({ ok: true, scans: allScans_(p.since) });
     return json_({ ok: false, error: 'Unknown action: ' + action });
   } catch (err) {
@@ -65,6 +66,8 @@ function saveAudit_(audit, scans) {
   const auditsSh = sheet_(AUDITS_SHEET, AUDIT_HEADERS);
   const scansSh = sheet_(SCANS_SHEET, SCAN_HEADERS);
   const id = String(audit.auditId);
+  audit.scannedBy = String(audit.scannedBy).trim().replace(/\s+/g, ' ');
+  audit.location = String(audit.location || '').trim();
   const savedAt = new Date();
 
   // Remove any existing scan rows for this audit (re-save = replace)
@@ -138,20 +141,39 @@ function listAudits_(limit) {
     .slice(0, limit);
 }
 
-function getAudit_(id) {
-  if (!id) return { ok: false, error: 'Missing id' };
-  const auditsSh = sheet_(AUDITS_SHEET, AUDIT_HEADERS);
-  const row = findRowById_(auditsSh, id);
-  if (!row) return { ok: false, error: 'Audit not found: ' + id };
-  const r = auditsSh.getRange(row, 1, 1, AUDIT_HEADERS.length).getValues()[0];
-  const audit = {
+function auditFromRow_(r) {
+  return {
     auditId: String(r[0]), savedAt: iso_(r[1]), startedAt: iso_(r[2]),
     scannedBy: r[3], location: r[4], notes: r[5],
     masterCount: r[6], found: r[7], extra: r[8], missing: r[9], totalScanned: r[10],
     missingList: String(r[12] || '').split(';').filter(Boolean)
   };
+}
+
+function getAudit_(id) {
+  if (!id) return { ok: false, error: 'Missing id' };
+  const auditsSh = sheet_(AUDITS_SHEET, AUDIT_HEADERS);
+  const row = findRowById_(auditsSh, id);
+  if (!row) return { ok: false, error: 'Audit not found: ' + id };
+  const audit = auditFromRow_(auditsSh.getRange(row, 1, 1, AUDIT_HEADERS.length).getValues()[0]);
   const scans = allScans_().filter(s => s.auditId === String(id));
   return { ok: true, audit: audit, scans: scans };
+}
+
+/** Several audits in one call; reads each sheet once. */
+function getManyAudits_(ids) {
+  const want = new Set(ids.map(String));
+  const auditsSh = sheet_(AUDITS_SHEET, AUDIT_HEADERS);
+  const last = auditsSh.getLastRow();
+  const audits = last < 2 ? [] : auditsSh.getRange(2, 1, last - 1, AUDIT_HEADERS.length).getValues()
+    .filter(r => want.has(String(r[0])))
+    .map(auditFromRow_);
+  const scansById = {};
+  allScans_().forEach(s => {
+    if (!want.has(s.auditId)) return;
+    (scansById[s.auditId] = scansById[s.auditId] || []).push(s);
+  });
+  return audits.map(a => ({ ok: true, audit: a, scans: scansById[a.auditId] || [] }));
 }
 
 function allScans_(since) {

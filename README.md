@@ -7,7 +7,10 @@ ScanAudit — phone barcode scanner for Barra GPS serials. Hosted on GitHub Page
 1. On the phone: enter **your name** (+ depot / notes), scan, tap **Save Audit**.
    Saving again after more scans updates the same audit (no duplicate rows).
 2. **Start new audit** clears the scanner and gives a new Audit ID.
-3. On any device, tap **Saved** → download one audit, a selection, or **All scans** as Excel.
+3. On any device, tap **Saved**:
+   - **Recent**: download one audit, a selection, or **All scans** as Excel.
+   - **By Auditor**: type a name to see that person's audits grouped into 2-day windows (e.g. 1/11 + 2/11 = one group; 3/11 starts the next). Download a group, or everything for that person.
+   Multi-audit downloads list each serial once (first scan kept), and `Missing` only shows serials that weren't scanned in any audit in the download.
    Workbook sheets: `Serials` (copy from here), `Missing`, `Audits` (summary).
 4. **Excel (this)** downloads the current session straight from the phone, no backend needed.
 
