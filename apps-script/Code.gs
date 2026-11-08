@@ -79,7 +79,7 @@ function saveAudit_(audit, scans) {
       id,
       text_(s.code),
       s.status === 'expected' ? 'MATCH' : 'EXTRA',
-      s.timestamp ? new Date(s.timestamp) : '',
+      date_(s.timestamp),
       audit.scannedBy,
       audit.location || ''
     ]);
@@ -94,7 +94,7 @@ function saveAudit_(audit, scans) {
   const summary = [
     id,
     savedAt,
-    audit.startedAt ? new Date(audit.startedAt) : savedAt,
+    date_(audit.startedAt) || savedAt,
     audit.scannedBy,
     audit.location || '',
     audit.notes || '',
@@ -236,8 +236,14 @@ function text_(v) { return String(v == null ? '' : v).trim(); }
 
 function iso_(v) {
   if (!v) return '';
-  if (v instanceof Date) return v.toISOString();
+  if (v instanceof Date) return isNaN(v.getTime()) ? '' : v.toISOString();
   return String(v);
+}
+
+function date_(v) {
+  if (!v) return '';
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? '' : d;
 }
 
 function json_(obj) {

@@ -16,6 +16,18 @@ ScanAudit — phone barcode scanner for Barra GPS serials. Hosted on GitHub Page
 
 Serials that are plain digits are written as numbers in Excel; anything with a leading zero or letters stays text.
 
+## Master list
+
+Tap **Master** in the header. The current list and where it came from are shown at the top.
+
+- **Paste**: type/paste serials (`;` `,` or new lines), or load a preset.
+- **Upload**: `.xlsx` / `.xls` / `.csv` / `.txt`. Picks the sheet + column automatically (a column headed "Serial…" wins, otherwise the column with the most serial-looking values). Both can be changed before applying. 15-digit IMEIs are always skipped. Our own exports open on the `Serials` sheet.
+- **From Audit**: tick one or more saved audits, then
+  - **Use Scanned**: every serial those audits actually scanned (match + extra)
+  - **Use Its Master**: the expected list those audits were checked against (matched + still missing)
+
+Changing the master mid-audit re-scores the current scans immediately.
+
 ## Backend setup (one-off, ~5 min)
 
 1. Create a new Google Sheet, e.g. **ScanAudit DB** (in the Google account that should own the data).
