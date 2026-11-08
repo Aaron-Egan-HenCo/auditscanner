@@ -78,7 +78,7 @@ function saveAudit_(audit, scans) {
     const rows = scans.map(s => [
       id,
       text_(s.code),
-      s.status === 'expected' ? 'MATCH' : 'EXTRA',
+      s.status === 'expected' ? 'MATCH' : s.status === 'added' ? 'ADDED' : 'EXTRA',
       date_(s.timestamp),
       audit.scannedBy,
       audit.location || ''

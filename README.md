@@ -26,7 +26,9 @@ Tap **Master** in the header. The current list and where it came from are shown 
   - **Use Scanned**: every serial those audits actually scanned (match + extra)
   - **Use Its Master**: the expected list those audits were checked against (matched + still missing)
 
-Changing the master mid-audit re-scores the current scans immediately.
+- **None / Free scan**: no master list. Every new serial is tagged **ADDED** (no MATCH/EXTRA/Missing). This is the default on a new device.
+
+Changing the master mid-audit re-scores the current scans immediately (e.g. free-scan ADDED items become MATCH/EXTRA once a list is set).
 
 ## Backend setup (one-off, ~5 min)
 

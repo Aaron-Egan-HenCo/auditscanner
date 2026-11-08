@@ -208,7 +208,7 @@
           List 2 (100 items)
         </button>
         <button id="clear-master-btn" class="px-2.5 py-1 rounded bg-rose-950/40 hover:bg-rose-900/50 border border-rose-800/40 text-rose-300">
-          Clear
+          None / Free scan
         </button>
       </div>
 
@@ -223,8 +223,20 @@
       </div>
     </div>
 
+    <!-- FREE SCAN SCORECARD (no master list) -->
+    <div id="free-scorecard" class="hidden bg-slate-900 border border-slate-800/80 rounded-2xl p-3 flex items-center justify-between">
+      <div>
+        <div class="text-[10px] font-bold tracking-wider uppercase text-slate-400">Free Scan · No Master List</div>
+        <div class="text-[11px] text-slate-500 mt-0.5">Every new serial is tagged <span class="text-violet-300 font-bold">ADDED</span></div>
+      </div>
+      <div class="text-right">
+        <div id="free-count" class="text-3xl font-black text-violet-300 leading-none">0</div>
+        <div class="text-[10px] text-slate-500 mt-1">scanned</div>
+      </div>
+    </div>
+
     <!-- AUDIT SUMMARY SCORECARD -->
-    <div class="grid grid-cols-3 gap-2.5">
+    <div id="audit-scorecard" class="grid grid-cols-3 gap-2.5">
       <div class="bg-slate-900 border border-slate-800/80 rounded-2xl p-3 text-center relative overflow-hidden">
         <div class="text-[10px] font-bold tracking-wider uppercase text-slate-400 mb-0.5">Found / Valid</div>
         <div class="text-2xl font-black text-emerald-400 flex items-center justify-center gap-1">
@@ -394,7 +406,7 @@
         <!-- Empty State -->
         <div id="missing-empty-state" class="py-8 text-center text-slate-500 text-xs">
           <i class="fa-solid fa-circle-check text-3xl mb-2 text-emerald-500/40 block"></i>
-          All target items have been found or no master list is configured!
+          <span id="missing-empty-text">All target items have been found!</span>
         </div>
         <ul id="missing-items-list" class="space-y-1.5"></ul>
       </div>
@@ -567,7 +579,7 @@
       if (savedMaster !== null) {
         parseAndSetMaster(savedMaster);
       } else {
-        parseAndSetMaster(PRESET_LIST_2);
+        parseAndSetMaster('', 'None (free scan)');
       }
 
       // Load Scanned items
@@ -670,9 +682,10 @@
       // from immediately reporting it as a duplicate
       lastFeedback.set('dup:' + cleanCode, Date.now());
 
-      // 2. Identify if Target / Master item or Extra
+      // 2. Identify if Target / Master item or Extra (or just Added in free-scan mode)
+      const freeMode = isFreeMode();
       const isExpected = masterSet.has(cleanCode);
-      const status = isExpected ? 'expected' : 'extra';
+      const status = freeMode ? 'added' : (isExpected ? 'expected' : 'extra');
 
       // 3. Register entry
       scannedSet.add(cleanCode);
@@ -683,7 +696,10 @@
       });
 
       // 4. Feedback
-      if (isExpected) {
+      if (freeMode) {
+        playBeep('success');
+        showToast('Added', cleanCode, 'success');
+      } else if (isExpected) {
         playBeep('success');
         showToast('Target Item Scanned', cleanCode, 'success');
       } else {
@@ -735,8 +751,28 @@
       document.getElementById('tab-count-scanned').textContent = scannedList.length;
       document.getElementById('tab-count-missing').textContent = missingCount;
 
+      const freeMode = isFreeMode();
+      document.getElementById('free-scorecard').classList.toggle('hidden', !freeMode);
+      document.getElementById('audit-scorecard').classList.toggle('hidden', freeMode);
+      document.getElementById('free-count').textContent = scannedList.length;
+      document.getElementById('missing-empty-text').textContent = freeMode
+        ? 'No master list set — free scan mode. Add one under Master to track missing serials.'
+        : 'All target items have been found!';
+
       renderScannedItems();
       renderMissingItems();
+    }
+
+    function isFreeMode() { return masterSet.size === 0; }
+
+    // Status label for a serial under the current master list
+    function statusLabel(code) {
+      if (isFreeMode()) return 'ADDED';
+      return masterSet.has(code) ? 'MATCH' : 'EXTRA';
+    }
+    function statusKey(code) {
+      if (isFreeMode()) return 'added';
+      return masterSet.has(code) ? 'expected' : 'extra';
     }
 
     function renderScannedItems() {
@@ -756,10 +792,12 @@
         
         li.className = "flex items-center justify-between p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 shadow-sm transition-all";
         
-        const badgeColor = isTarget
-          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-          : "bg-cyan-500/10 text-cyan-400 border-cyan-500/30";
-        const badgeText = isTarget ? "MATCH" : "EXTRA";
+        const badgeText = statusLabel(item.code);
+        const badgeColor = badgeText === 'ADDED'
+          ? "bg-violet-500/10 text-violet-300 border-violet-500/30"
+          : isTarget
+            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+            : "bg-cyan-500/10 text-cyan-400 border-cyan-500/30";
 
         li.innerHTML = `
           <div class="flex items-center gap-2.5 min-w-0">
@@ -1044,22 +1082,26 @@
       document.getElementById('load-list-1-btn').addEventListener('click', () => {
         parseAndSetMaster(PRESET_LIST_1, 'Preset List 1');
         updateAuditUI();
+        markDirtyIfScans();
         showToast("Loaded List 1", "93 expected serials set", "neutral");
       });
       document.getElementById('load-list-2-btn').addEventListener('click', () => {
         parseAndSetMaster(PRESET_LIST_2, 'Preset List 2');
         updateAuditUI();
+        markDirtyIfScans();
         showToast("Loaded List 2", "100 items set", "neutral");
       });
       document.getElementById('clear-master-btn').addEventListener('click', () => {
-        parseAndSetMaster("", 'Empty');
+        parseAndSetMaster("", 'None (free scan)');
         updateAuditUI();
-        showToast("Cleared Target List", "0 expected items", "neutral");
+        markDirtyIfScans();
+        showToast("Free Scan Mode", "No master list — scans are tagged ADDED", "neutral");
       });
 
       document.getElementById('save-master-btn').addEventListener('click', () => {
         const val = document.getElementById('master-list-input').value;
         parseAndSetMaster(val, 'Pasted');
+        markDirtyIfScans();
         modal.classList.add('hidden');
         updateAuditUI();
         showToast("Master List Updated", `${masterSet.size} items ready for audit`, "success");
@@ -1092,7 +1134,7 @@
         exportContent += `Extra Items: ${scannedList.filter(i => !masterSet.has(i.code)).length}\n`;
         exportContent += `Missing Items: ${missing.length}\n\n`;
         exportContent += `--- SCANNED ITEMS (${scannedList.length}) ---\n`;
-        exportContent += scannedList.map(i => `${i.code} [${masterSet.has(i.code) ? 'MATCH' : 'EXTRA'}] - ${i.timestamp}`).join('\n');
+        exportContent += scannedList.map(i => `${i.code} [${statusLabel(i.code)}] - ${i.timestamp}`).join('\n');
         exportContent += `\n\n--- REMAINING MISSING TARGETS (${missing.length}) ---\n`;
         exportContent += missing.join('\n');
 
@@ -1268,7 +1310,7 @@
           notes: session.notes || '',
           masterCount: masterSet.size,
           found: found,
-          extra: scannedList.length - found,
+          extra: isFreeMode() ? 0 : scannedList.length - found,
           missing: missingList.length,
           masterList: Array.from(masterSet),
           missingList: missingList
@@ -1276,7 +1318,7 @@
         // oldest first so the sheet reads in scan order
         scans: scannedList.slice().reverse().map(i => ({
           code: i.code,
-          status: masterSet.has(i.code) ? 'expected' : 'extra',
+          status: statusKey(i.code),
           timestamp: i.timestamp
         }))
       };
@@ -1377,9 +1419,9 @@
             <div class="text-[11px] text-slate-400 mt-0.5">${esc(when)}</div>
             <div class="text-[11px] mt-1 flex gap-3 font-mono">
               <span class="text-slate-300">${esc(a.totalScanned)} scanned</span>
-              <span class="text-emerald-400">${esc(a.found)}/${esc(a.masterCount)}</span>
+              ${Number(a.masterCount) > 0 ? `<span class="text-emerald-400">${esc(a.found)}/${esc(a.masterCount)}</span>
               <span class="text-cyan-400">+${esc(a.extra)}</span>
-              <span class="text-amber-400">-${esc(a.missing)}</span>
+              <span class="text-amber-400">-${esc(a.missing)}</span>` : `<span class="text-violet-300">free scan</span>`}
             </div>
             ${a.notes ? `<div class="text-[11px] text-slate-500 mt-1 truncate">${esc(a.notes)}</div>` : ''}
             <div class="text-[9px] text-slate-600 font-mono mt-1">${esc(a.auditId)}</div>
@@ -1527,7 +1569,7 @@
             <div class="flex items-start gap-3">
               <div class="flex-1 min-w-0">
                 <div class="text-sm font-bold text-cyan-300">${esc(range)}</div>
-                <div class="text-[11px] text-slate-400 mt-0.5">${g.audits.length} audit${g.audits.length > 1 ? 's' : ''} · ${scans} scans · ${found} matched${locations ? ' · ' + esc(locations) : ''}</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">${g.audits.length} audit${g.audits.length > 1 ? 's' : ''} · ${scans} scans${g.audits.some(a => Number(a.masterCount) > 0) ? ` · ${found} matched` : ''}${locations ? ' · ' + esc(locations) : ''}</div>
               </div>
               <button class="group-download shrink-0 px-3 h-9 rounded-lg bg-emerald-600/90 active:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5">
                 <i class="fa-solid fa-file-arrow-down"></i> .xlsx
@@ -1538,7 +1580,7 @@
                 const t = new Date(auditDate(a)).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
                 return `<div class="flex items-center justify-between text-[11px] font-mono bg-slate-950/60 rounded-lg px-2 py-1.5">
                   <span class="text-slate-300">${esc(t)}${a.location ? ' · ' + esc(a.location) : ''}</span>
-                  <span><span class="text-slate-300">${esc(a.totalScanned)}</span> <span class="text-emerald-400">${esc(a.found)}/${esc(a.masterCount)}</span> <span class="text-cyan-400">+${esc(a.extra)}</span></span>
+                  <span><span class="text-slate-300">${esc(a.totalScanned)}</span> ${Number(a.masterCount) > 0 ? `<span class="text-emerald-400">${esc(a.found)}/${esc(a.masterCount)}</span> <span class="text-cyan-400">+${esc(a.extra)}</span>` : `<span class="text-violet-300">free</span>`}</span>
                 </div>`;
               }).join('')}
             </div>`;
@@ -1710,10 +1752,10 @@
       const now = new Date().toISOString();
       const audit = {
         auditId: session.auditId, savedAt: now, scannedBy: name, location, notes: session.notes || '',
-        totalScanned: scannedList.length, found, masterCount: masterSet.size, extra: scannedList.length - found, missing: missingList.length
+        totalScanned: scannedList.length, found, masterCount: masterSet.size, extra: isFreeMode() ? 0 : scannedList.length - found, missing: missingList.length
       };
       const scans = scannedList.slice().reverse().map(i => ({
-        serial: i.code, status: masterSet.has(i.code) ? 'MATCH' : 'EXTRA', scannedAt: i.timestamp,
+        serial: i.code, status: statusLabel(i.code), scannedAt: i.timestamp,
         scannedBy: name, location, auditId: session.auditId
       }));
       const missing = missingList.map(serial => ({ serial, scannedBy: name, location, auditId: session.auditId }));
@@ -1842,10 +1884,14 @@
       btn.textContent = serials.length ? `Use ${serials.length} serials as Master List` : 'Use as Master List';
     }
 
+    function markDirtyIfScans() {
+      if (session && scannedList.length) { session.dirty = true; saveSessionMeta(); updateSaveStatusUI(); }
+    }
+
     function applyMasterList(serials, label) {
       parseAndSetMaster(serials.join(';'), label);
       updateAuditUI();
-      if (session && scannedList.length) { session.dirty = true; saveSessionMeta(); updateSaveStatusUI(); }
+      markDirtyIfScans();
       document.getElementById('master-list-modal').classList.add('hidden');
       showToast("Master List Updated", `${masterSet.size} serials · ${label}`, "success");
     }
@@ -1900,7 +1946,7 @@
             </div>
             <div class="text-[10px] font-mono text-right shrink-0">
               <div class="text-slate-300">${esc(a.totalScanned)} scanned</div>
-              <div class="text-slate-500">${esc(a.masterCount)} master</div>
+              <div class="text-slate-500">${Number(a.masterCount) > 0 ? esc(a.masterCount) + ' master' : 'free scan'}</div>
             </div>
           </label>`;
         list.appendChild(li);
